@@ -1,0 +1,364 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "VpcCidr": {
+      "Description": "The address space of VPC. (Recommend at least a /16)",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "19",
+      "Default": "10.0.0.0/16",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+    "SubnetCidr": {
+      "Description": "The address space assigned to the subnet. (x.x.x.x/x notation)",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "19",
+      "Default": "10.0.1.0/24",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+    "PrivateSubnetCidr": {
+      "Description": "The address space assigned to the subnet. (x.x.x.x/x notation)",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "19",
+      "Default": "10.0.2.0/24",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+    "SSHLocation": {
+      "Description": "SSH ip address. (x.x.x.x/x notation)",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "19",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+    "KeyPair": {
+      "Description": "SSH Key pair to associate with EC2 resources",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Default": ""
+    }
+  },
+  "Resources": {
+    "myVPC": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": {
+          "Ref": "VpcCidr"
+        },
+        "InstanceTenancy": "default",
+        "EnableDnsSupport": "true",
+        "EnableDnsHostnames": "true",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "myInternetGateway": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "GatewayToInternet": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "InternetGatewayId": {
+          "Ref": "myInternetGateway"
+        }
+      }
+    },
+    "MyLoadBalancer" : {
+    "DependsOn": [
+        "ELBSecurityGroup","GatewayToInternet"
+      ],
+    "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+    "Properties" : {
+        "Subnets": [{"Ref":"PublicSubnet"}, {"Ref":"PrivateSubnet"}],
+
+        "Instances": [
+
+
+          {"Ref": "PrivateEC2"}
+        ],
+        "SecurityGroups":[ {"Ref": "ELBSecurityGroup"}],
+        "Listeners" : [ {
+            "LoadBalancerPort" : "80",
+            "InstancePort" : "80",
+            "Protocol" : "HTTP"
+        } ],
+        "HealthCheck" : {
+           "Target" : "HTTP:80/",
+           "HealthyThreshold" : "3",
+           "UnhealthyThreshold" : "5",
+           "Interval" : "30",
+           "Timeout" : "5"
+       },
+       "ConnectionDrainingPolicy": {
+     "Enabled" : "true",
+     "Timeout" : "60"
+   }
+    }
+},
+"ELBSecurityGroup":{
+
+  "Type": "AWS::EC2::SecurityGroup",
+    "Properties": {
+      "GroupDescription": "this is my ELB security group",
+      "VpcId": {
+        "Ref": "myVPC"
+      },
+      "SecurityGroupIngress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": "80",
+          "ToPort": "80",
+          "CidrIp": "0.0.0.0/0"
+
+        } ]
+}
+},
+    "NATEC2": {
+      "DependsOn":["PublicSecurityGroup"],
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "AvailabilityZone": "us-east-1a",
+        "ImageId": "ami-184dc970",
+        "InstanceType": "t2.micro",
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+         "SourceDestCheck" : "false",
+
+        "NetworkInterfaces" : [{
+          "GroupSet"                 : [{ "Ref" : "PublicSecurityGroup" }],
+          "AssociatePublicIpAddress" : "true",
+          "DeviceIndex"              : "0",
+          "DeleteOnTermination"      : "true",
+          "SubnetId"                 : { "Ref" : "PublicSubnet" }
+        }]
+
+      }
+    },
+    "PublicSubnet": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": "us-east-1a",
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "CidrBlock": {
+          "Ref": "SubnetCidr"
+        },
+        "MapPublicIpOnLaunch": "true",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "PublicSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "this is my security group",
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "CidrIp": {
+              "Ref": "SSHLocation"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "443",
+            "ToPort": "443",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+
+      }
+    },
+    "PublicRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "PublicRoute": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": "GatewayToInternet",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "PublicRouteTable"
+        },
+        "GatewayId": {
+          "Ref": "myInternetGateway"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0"
+      }
+    },
+    "PublicSubnetRouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicSubnet"
+        },
+        "RouteTableId": {
+          "Ref": "PublicRouteTable"
+        }
+      }
+    },
+    "PrivateSubnet": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": "us-east-1b",
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "CidrBlock": {
+          "Ref": "PrivateSubnetCidr"
+        },
+        "MapPublicIpOnLaunch": "false",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "PrivateEC2": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "AvailabilityZone": "us-east-1b",
+        "ImageId": "ami-c481fad3",
+        "InstanceType": "t2.micro",
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash \n",
+                 "yum update -y \n",
+                 "curl -L https://www.opscode.com/chef/install.sh | bash \n",
+                 "mkdir chef-repo  \n",
+                 "mv chef-repo ~ \n",
+                 "cd ~/chef-repo \n",
+                 "mkdir -p cookbooks/main/recipes \n",
+                 "wget -P cookbooks/main/recipes https://s3.amazonaws.com/chefdk-wne/default.rb \n",
+                 "wget https://s3.amazonaws.com/chefdk-wne/web.json \n",
+                 "wget https://s3.amazonaws.com/chefdk-wne/solo.rb \n",
+                 "chef-solo -c solo.rb -j web.json \n"
+              ]
+            ]
+          }
+        },
+        "SubnetId": {
+          "Ref": "PrivateSubnet"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "PrivateSecurityGroup"
+          }
+        ]
+      }
+    },
+    "PrivateSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "this is my Priavte security group",
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "SourceSecurityGroupId": {
+              "Ref": "PublicSecurityGroup"
+            }
+          }
+        ]
+
+      }
+    },
+    "PrivateRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "myVPC"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "taskvpc"
+          }
+        ]
+      }
+    },
+    "PrivateRoute": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "PrivateRouteTable"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "InstanceId": {
+          "Ref": "NATEC2"
+        }
+      }
+    },
+    "PrivateSubnetRouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PrivateSubnet"
+        },
+        "RouteTableId": {
+          "Ref": "PrivateRouteTable"
+        }
+      }
+    }
+  }
+
+}
